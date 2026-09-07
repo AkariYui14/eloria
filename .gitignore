@@ -1,0 +1,23 @@
+# Environment / configuration
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/*
+!.vscode/settings.json
+
+# Dependencies
+node_modules/
+vendor/
