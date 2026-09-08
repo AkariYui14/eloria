@@ -106,8 +106,17 @@ function order_status_class($status)
         return "status-cancelled";
     }
 
+    /*
+     * PROCESSING / SHIPPING
+     *
+     * The admin order page uses "Shipping".
+     * "Shipped" is also supported in case an older
+     * order contains that status.
+     */
+
     if (
         $status === "processing" ||
+        $status === "shipping" ||
         $status === "shipped"
     ) {
         return "status-processing";
@@ -1516,12 +1525,6 @@ function order_status_class($status)
                                 </div>
 
 
-                                <!--
-                                    IMPORTANT:
-                                    This is now a BUTTON.
-                                    It DOES NOT go to order-details.php.
-                                -->
-
                                 <button
                                     type="button"
                                     class="view-order-button"
@@ -1928,7 +1931,8 @@ function order_status_class($status)
                     $detail_result =
                         $detail_stmt->get_result();
 
-                    if ($detail_row =
+                    if (
+                        $detail_row =
                         $detail_result->fetch_assoc()
                     ) {
 
@@ -2083,8 +2087,10 @@ function order_status_class($status)
 
         function escapeHtml(value) {
 
-            if (value === null ||
-                value === undefined) {
+            if (
+                value === null ||
+                value === undefined
+            ) {
 
                 return "";
 
@@ -2150,8 +2156,16 @@ function order_status_class($status)
             }
 
 
+            /*
+             * PROCESSING / SHIPPING
+             *
+             * The admin page uses "Shipping".
+             * "Shipped" is supported as well.
+             */
+
             if (
                 normalized === "processing" ||
+                normalized === "shipping" ||
                 normalized === "shipped"
             ) {
 
@@ -2388,9 +2402,7 @@ function order_status_class($status)
                 order.items.length > 0
             ) {
 
-
                 order.items.forEach(function (item) {
-
 
                     const itemTotal =
                         Number(item.price) *

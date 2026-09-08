@@ -26,19 +26,32 @@ if (!isset($_SESSION["is_admin"]) || $_SESSION["is_admin"] != 1) {
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
 
-    $order_id = isset($_POST["order_id"]) ? (int) $_POST["order_id"] : 0;
+    $order_id = isset($_POST["order_id"])
+        ? (int) $_POST["order_id"]
+        : 0;
+
     $new_status = trim($_POST["status"] ?? "");
 
+
+    /* Allowed order statuses */
     $allowed_statuses = [
         "Pending",
         "Processing",
-        "Completed",
+        "Shipping",
+        "Delivered",
         "Cancelled"
     ];
 
-    if ($order_id > 0 && in_array($new_status, $allowed_statuses, true)) {
 
-        /* Get current status */
+    if (
+        $order_id > 0 &&
+        in_array($new_status, $allowed_statuses, true)
+    ) {
+
+        /* =========================================
+           GET CURRENT STATUS
+        ========================================== */
+
         $current_status = "";
 
         $status_stmt = $conn->prepare("
@@ -50,24 +63,123 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
 
         if ($status_stmt) {
 
-            $status_stmt->bind_param("i", $order_id);
+            $status_stmt->bind_param(
+                "i",
+                $order_id
+            );
+
             $status_stmt->execute();
 
-            $status_result = $status_stmt->get_result();
+            $status_result =
+                $status_stmt->get_result();
 
-            if ($status_row = $status_result->fetch_assoc()) {
-                $current_status = $status_row["status"];
+            if ($status_row =
+                $status_result->fetch_assoc()
+            ) {
+
+                $current_status =
+                    $status_row["status"];
             }
 
             $status_stmt->close();
         }
 
 
-        /* Update order status */
+        /* =========================================
+           DO NOT CHANGE DELIVERED ORDERS
+        ========================================== */
+
+        if ($current_status === "Delivered") {
+
+            $query_params = [];
+
+            $filter_names = [
+                "from_date",
+                "from_time",
+                "to_date",
+                "to_time",
+                "status_filter",
+                "user_filter"
+            ];
+
+            foreach ($filter_names as $filter_name) {
+
+                if (
+                    isset($_POST[$filter_name]) &&
+                    $_POST[$filter_name] !== ""
+                ) {
+
+                    $query_params[$filter_name] =
+                        $_POST[$filter_name];
+                }
+            }
+
+
+            $redirect_url = "orders.php";
+
+            if (!empty($query_params)) {
+
+                $redirect_url .= "?" .
+                    http_build_query($query_params);
+            }
+
+            header("Location: " . $redirect_url);
+            exit;
+        }
+
+
+        /* =========================================
+           IGNORE SAME STATUS
+        ========================================== */
+
+        if ($current_status === $new_status) {
+
+            $query_params = [];
+
+            $filter_names = [
+                "from_date",
+                "from_time",
+                "to_date",
+                "to_time",
+                "status_filter",
+                "user_filter"
+            ];
+
+            foreach ($filter_names as $filter_name) {
+
+                if (
+                    isset($_POST[$filter_name]) &&
+                    $_POST[$filter_name] !== ""
+                ) {
+
+                    $query_params[$filter_name] =
+                        $_POST[$filter_name];
+                }
+            }
+
+
+            $redirect_url = "orders.php";
+
+            if (!empty($query_params)) {
+
+                $redirect_url .= "?" .
+                    http_build_query($query_params);
+            }
+
+            header("Location: " . $redirect_url);
+            exit;
+        }
+
+
+        /* =========================================
+           UPDATE ORDER STATUS
+        ========================================== */
+
         $update_stmt = $conn->prepare("
             UPDATE orders
             SET status = ?
             WHERE id = ?
+            AND status <> 'Delivered'
         ");
 
         if ($update_stmt) {
@@ -78,23 +190,35 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
                 $order_id
             );
 
+
             if ($update_stmt->execute()) {
 
-                /* Activity log */
+                /* =========================================
+                   ACTIVITY LOG
+                ========================================== */
+
                 $action = "UPDATE_ORDER";
 
                 $description =
                     "Updated order #" .
                     $order_id .
                     " status from " .
-                    ($current_status !== "" ? $current_status : "Unknown") .
+                    (
+                        $current_status !== ""
+                            ? $current_status
+                            : "Unknown"
+                    ) .
                     " to " .
                     $new_status .
                     ".";
 
                 $target_type = "order";
+
                 $target_id = $order_id;
-                $user_id = (int) $_SESSION["user_id"];
+
+                $user_id =
+                    (int) $_SESSION["user_id"];
+
 
                 $log_stmt = $conn->prepare("
                     INSERT INTO activity_logs
@@ -108,6 +232,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
                     VALUES (?, ?, ?, ?, ?)
                 ");
 
+
                 if ($log_stmt) {
 
                     $log_stmt->bind_param(
@@ -120,13 +245,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
                     );
 
                     $log_stmt->execute();
+
                     $log_stmt->close();
                 }
 
 
-                /*
-                 * Preserve filters after updating status
-                 */
+                /* =========================================
+                   PRESERVE FILTERS
+                ========================================== */
+
                 $query_params = [];
 
                 $filter_names = [
@@ -137,6 +264,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
                     "status_filter",
                     "user_filter"
                 ];
+
 
                 foreach ($filter_names as $filter_name) {
 
@@ -150,7 +278,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
                     }
                 }
 
+
                 $redirect_url = "orders.php";
+
 
                 if (!empty($query_params)) {
 
@@ -158,9 +288,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
                         http_build_query($query_params);
                 }
 
+
                 header("Location: " . $redirect_url);
                 exit;
             }
+
 
             $update_stmt->close();
         }
@@ -172,17 +304,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["update_status"])) {
    FILTER VALUES
 ========================================= */
 
-$from_date = trim($_GET["from_date"] ?? "");
-$from_time = trim($_GET["from_time"] ?? "");
+$from_date =
+    trim($_GET["from_date"] ?? "");
 
-$to_date = trim($_GET["to_date"] ?? "");
-$to_time = trim($_GET["to_time"] ?? "");
+$from_time =
+    trim($_GET["from_time"] ?? "");
 
-$status_filter = trim($_GET["status_filter"] ?? "");
+$to_date =
+    trim($_GET["to_date"] ?? "");
 
-$user_filter = isset($_GET["user_filter"])
-    ? (int) $_GET["user_filter"]
-    : 0;
+$to_time =
+    trim($_GET["to_time"] ?? "");
+
+$status_filter =
+    trim($_GET["status_filter"] ?? "");
+
+$user_filter =
+    isset($_GET["user_filter"])
+        ? (int) $_GET["user_filter"]
+        : 0;
 
 
 /* =========================================
@@ -192,8 +332,13 @@ $user_filter = isset($_GET["user_filter"])
 $filter_error = "";
 
 $from_datetime = "";
+
 $to_datetime = "";
 
+
+/* =========================================
+   FROM DATE/TIME
+========================================= */
 
 if ($from_date !== "") {
 
@@ -201,17 +346,25 @@ if ($from_date !== "") {
         $from_time = "00:00";
     }
 
+
     $from_datetime =
         $from_date .
         " " .
         $from_time .
         ":00";
 
-    if (
-        !DateTime::createFromFormat(
+
+    $from_date_object =
+        DateTime::createFromFormat(
             "Y-m-d H:i:s",
             $from_datetime
-        )
+        );
+
+
+    if (
+        !$from_date_object ||
+        $from_date_object->format("Y-m-d H:i:s")
+        !== $from_datetime
     ) {
 
         $filter_error =
@@ -220,11 +373,16 @@ if ($from_date !== "") {
 }
 
 
+/* =========================================
+   TO DATE/TIME
+========================================= */
+
 if ($to_date !== "") {
 
     if ($to_time === "") {
         $to_time = "23:59";
     }
+
 
     $to_datetime =
         $to_date .
@@ -232,11 +390,18 @@ if ($to_date !== "") {
         $to_time .
         ":59";
 
-    if (
-        !DateTime::createFromFormat(
+
+    $to_date_object =
+        DateTime::createFromFormat(
             "Y-m-d H:i:s",
             $to_datetime
-        )
+        );
+
+
+    if (
+        !$to_date_object ||
+        $to_date_object->format("Y-m-d H:i:s")
+        !== $to_datetime
     ) {
 
         $filter_error =
@@ -244,6 +409,10 @@ if ($to_date !== "") {
     }
 }
 
+
+/* =========================================
+   CHECK DATE RANGE
+========================================= */
 
 if (
     $filter_error === "" &&
@@ -263,10 +432,37 @@ if (
 
 
 /* =========================================
+   VALID STATUS FILTER
+========================================= */
+
+$valid_filter_statuses = [
+    "Pending",
+    "Processing",
+    "Shipping",
+    "Delivered",
+    "Cancelled"
+];
+
+
+if (
+    $status_filter !== "" &&
+    !in_array(
+        $status_filter,
+        $valid_filter_statuses,
+        true
+    )
+) {
+
+    $status_filter = "";
+}
+
+
+/* =========================================
    GET USERS
 ========================================= */
 
 $users = [];
+
 
 $user_stmt = $conn->prepare("
     SELECT
@@ -278,16 +474,23 @@ $user_stmt = $conn->prepare("
     ORDER BY first_name ASC, last_name ASC
 ");
 
+
 if ($user_stmt) {
 
     $user_stmt->execute();
 
-    $user_result = $user_stmt->get_result();
+    $user_result =
+        $user_stmt->get_result();
 
-    while ($user_row = $user_result->fetch_assoc()) {
+
+    while (
+        $user_row =
+        $user_result->fetch_assoc()
+    ) {
 
         $users[] = $user_row;
     }
+
 
     $user_stmt->close();
 }
@@ -300,62 +503,107 @@ if ($user_stmt) {
 $orders = [];
 
 $where = [];
+
 $params = [];
+
 $types = "";
 
 
 if ($filter_error === "") {
 
+
+    /* =========================================
+       FROM DATETIME FILTER
+    ========================================== */
+
     if ($from_datetime !== "") {
 
-        $where[] = "o.created_at >= ?";
-        $params[] = $from_datetime;
+        $where[] =
+            "o.created_at >= ?";
+
+        $params[] =
+            $from_datetime;
+
         $types .= "s";
     }
 
+
+    /* =========================================
+       TO DATETIME FILTER
+    ========================================== */
 
     if ($to_datetime !== "") {
 
-        $where[] = "o.created_at <= ?";
-        $params[] = $to_datetime;
+        $where[] =
+            "o.created_at <= ?";
+
+        $params[] =
+            $to_datetime;
+
         $types .= "s";
     }
 
+
+    /* =========================================
+       STATUS FILTER
+    ========================================== */
 
     if ($status_filter !== "") {
 
-        $where[] = "o.status = ?";
-        $params[] = $status_filter;
+        $where[] =
+            "o.status = ?";
+
+        $params[] =
+            $status_filter;
+
         $types .= "s";
     }
 
 
+    /* =========================================
+       CUSTOMER FILTER
+    ========================================== */
+
     if ($user_filter > 0) {
 
-        $where[] = "o.user_id = ?";
-        $params[] = $user_filter;
+        $where[] =
+            "o.user_id = ?";
+
+        $params[] =
+            $user_filter;
+
         $types .= "i";
     }
 
+
+    /* =========================================
+       ORDER QUERY
+    ========================================== */
 
     $sql = "
         SELECT
             o.id,
             o.user_id,
+
             o.first_name,
             o.last_name,
             o.email,
             o.phone,
+
             o.address,
             o.barangay,
             o.city,
             o.province,
             o.postal_code,
+
             o.delivery_notes,
+
             o.payment_method,
             o.payment_status,
+
             o.delivery_fee,
             o.total_amount,
+
             o.status,
             o.created_at,
 
@@ -380,7 +628,10 @@ if ($filter_error === "") {
 
         $sql .=
             " WHERE " .
-            implode(" AND ", $where);
+            implode(
+                " AND ",
+                $where
+            );
     }
 
 
@@ -389,9 +640,12 @@ if ($filter_error === "") {
     ";
 
 
-    $stmt = $conn->prepare($sql);
+    $stmt =
+        $conn->prepare($sql);
+
 
     if ($stmt) {
+
 
         if (!empty($params)) {
 
@@ -401,14 +655,23 @@ if ($filter_error === "") {
             );
         }
 
+
         $stmt->execute();
 
-        $result = $stmt->get_result();
 
-        while ($row = $result->fetch_assoc()) {
+        $result =
+            $stmt->get_result();
 
-            $orders[] = $row;
+
+        while (
+            $row =
+            $result->fetch_assoc()
+        ) {
+
+            $orders[] =
+                $row;
         }
+
 
         $stmt->close();
     }
@@ -422,6 +685,10 @@ if ($filter_error === "") {
 $active_filters = [];
 
 
+/* =========================================
+   FROM FILTER
+========================================= */
+
 if ($from_datetime !== "") {
 
     $active_filters[] =
@@ -432,6 +699,10 @@ if ($from_datetime !== "") {
         );
 }
 
+
+/* =========================================
+   TO FILTER
+========================================= */
 
 if ($to_datetime !== "") {
 
@@ -444,13 +715,23 @@ if ($to_datetime !== "") {
 }
 
 
+/* =========================================
+   STATUS FILTER
+========================================= */
+
 if ($status_filter !== "") {
 
     $active_filters[] =
         "Status: " .
-        htmlspecialchars($status_filter);
+        htmlspecialchars(
+            $status_filter
+        );
 }
 
+
+/* =========================================
+   CUSTOMER FILTER
+========================================= */
 
 if ($user_filter > 0) {
 
@@ -495,13 +776,11 @@ if ($user_filter > 0) {
 
     <style>
 
-
         /* =========================================
            RESET
         ========================================= */
 
         * {
-
             margin: 0;
             padding: 0;
             box-sizing: border-box;
@@ -509,7 +788,6 @@ if ($user_filter > 0) {
 
 
         body {
-
             font-family:
                 Arial,
                 Helvetica,
@@ -522,9 +800,7 @@ if ($user_filter > 0) {
 
 
         a {
-
             text-decoration: none;
-
             color: inherit;
         }
 
@@ -534,20 +810,16 @@ if ($user_filter > 0) {
         ========================================= */
 
         .admin-layout {
-
             min-height: 100vh;
-
             display: flex;
         }
 
 
         /* =========================================
            SIDEBAR
-           COPIED FROM USERS.PHP DESIGN
         ========================================= */
 
         .sidebar {
-
             width: 250px;
 
             background: #dcebdc;
@@ -561,9 +833,7 @@ if ($user_filter > 0) {
             position: fixed;
 
             left: 0;
-
             top: 0;
-
             bottom: 0;
 
             border-right:
@@ -576,15 +846,12 @@ if ($user_filter > 0) {
         ========================================= */
 
         .brand {
-
             text-align: center;
-
             margin-bottom: 40px;
         }
 
 
         .brand img {
-
             width: 150px;
 
             height: auto;
@@ -598,7 +865,6 @@ if ($user_filter > 0) {
 
 
         .brand p {
-
             font-size: 12px;
 
             color: #4d6655;
@@ -618,7 +884,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .nav {
-
             display: flex;
 
             flex-direction: column;
@@ -628,7 +893,6 @@ if ($user_filter > 0) {
 
 
         .nav a {
-
             padding: 13px 15px;
 
             border-radius: 10px;
@@ -643,7 +907,6 @@ if ($user_filter > 0) {
 
 
         .nav a:hover {
-
             background: #c9ddca;
 
             color: #1f442f;
@@ -654,7 +917,6 @@ if ($user_filter > 0) {
 
 
         .nav a.active {
-
             background: #294f37;
 
             color: #ffffff;
@@ -668,7 +930,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .logout {
-
             margin-top: 25px;
 
             border-top:
@@ -685,13 +946,11 @@ if ($user_filter > 0) {
 
 
         .logout a {
-
             color: #355642;
         }
 
 
         .logout a:hover {
-
             background: #c9ddca;
 
             color: #1f442f;
@@ -703,7 +962,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .main-content {
-
             margin-left: 250px;
 
             width:
@@ -718,13 +976,11 @@ if ($user_filter > 0) {
         ========================================= */
 
         .page-header {
-
             margin-bottom: 30px;
         }
 
 
         .page-header h2 {
-
             font-family:
                 Georgia,
                 "Times New Roman",
@@ -737,7 +993,6 @@ if ($user_filter > 0) {
 
 
         .page-header p {
-
             color: #718077;
 
             margin-top: 6px;
@@ -749,7 +1004,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .filter-card {
-
             background: #ffffff;
 
             border-radius: 18px;
@@ -770,7 +1024,6 @@ if ($user_filter > 0) {
 
 
         .filter-card h3 {
-
             font-family:
                 Georgia,
                 "Times New Roman",
@@ -785,7 +1038,6 @@ if ($user_filter > 0) {
 
 
         .filter-grid {
-
             display: grid;
 
             grid-template-columns:
@@ -796,7 +1048,6 @@ if ($user_filter > 0) {
 
 
         .form-group {
-
             display: flex;
 
             flex-direction: column;
@@ -806,7 +1057,6 @@ if ($user_filter > 0) {
 
 
         .form-group label {
-
             font-size: 12px;
 
             font-weight: bold;
@@ -817,7 +1067,6 @@ if ($user_filter > 0) {
 
         .form-group input,
         .form-group select {
-
             width: 100%;
 
             height: 44px;
@@ -842,7 +1091,6 @@ if ($user_filter > 0) {
 
         .form-group input:focus,
         .form-group select:focus {
-
             border-color: #8bab91;
 
             box-shadow:
@@ -857,7 +1105,6 @@ if ($user_filter > 0) {
 
 
         .filter-actions {
-
             display: flex;
 
             align-items: center;
@@ -866,8 +1113,11 @@ if ($user_filter > 0) {
         }
 
 
-        .btn {
+        /* =========================================
+           BUTTONS
+        ========================================= */
 
+        .btn {
             height: 44px;
 
             padding:
@@ -894,7 +1144,6 @@ if ($user_filter > 0) {
 
 
         .btn-primary {
-
             background: #315c3d;
 
             color: #ffffff;
@@ -902,7 +1151,6 @@ if ($user_filter > 0) {
 
 
         .btn-primary:hover {
-
             background: #23452d;
 
             transform:
@@ -911,7 +1159,6 @@ if ($user_filter > 0) {
 
 
         .btn-light {
-
             background: #f5f7f2;
 
             color: #536359;
@@ -922,7 +1169,6 @@ if ($user_filter > 0) {
 
 
         .btn-light:hover {
-
             background: #e9eee8;
 
             color: #315c3d;
@@ -934,7 +1180,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .filter-error {
-
             background: #fff1f1;
 
             border:
@@ -944,7 +1189,8 @@ if ($user_filter > 0) {
 
             border-radius: 10px;
 
-            padding: 12px 15px;
+            padding:
+                12px 15px;
 
             margin-bottom: 18px;
 
@@ -957,7 +1203,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .filter-summary {
-
             display: flex;
 
             align-items: center;
@@ -973,7 +1218,6 @@ if ($user_filter > 0) {
 
 
         .filter-summary-left {
-
             color: #65736a;
 
             font-size: 13px;
@@ -981,13 +1225,11 @@ if ($user_filter > 0) {
 
 
         .filter-summary-left strong {
-
             color: #183a2a;
         }
 
 
         .filter-tags {
-
             display: flex;
 
             gap: 7px;
@@ -997,7 +1239,6 @@ if ($user_filter > 0) {
 
 
         .filter-tag {
-
             background: #e5efe7;
 
             color: #355642;
@@ -1018,7 +1259,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .table-card {
-
             background: #ffffff;
 
             border-radius: 18px;
@@ -1039,7 +1279,6 @@ if ($user_filter > 0) {
 
 
         .table-wrapper {
-
             width: 100%;
 
             overflow-x: auto;
@@ -1047,7 +1286,6 @@ if ($user_filter > 0) {
 
 
         table {
-
             width: 100%;
 
             border-collapse: collapse;
@@ -1057,7 +1295,6 @@ if ($user_filter > 0) {
 
 
         th {
-
             text-align: left;
 
             padding: 15px;
@@ -1074,8 +1311,8 @@ if ($user_filter > 0) {
 
 
         td {
-
-            padding: 18px 15px;
+            padding:
+                18px 15px;
 
             border-bottom:
                 1px solid #edf1ed;
@@ -1085,7 +1322,6 @@ if ($user_filter > 0) {
 
 
         tbody tr:hover {
-
             background: #fafcf9;
         }
 
@@ -1095,7 +1331,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .order-id {
-
             font-weight: bold;
 
             color: #183a2a;
@@ -1103,7 +1338,6 @@ if ($user_filter > 0) {
 
 
         .customer-name {
-
             font-weight: bold;
 
             color: #263a2d;
@@ -1113,7 +1347,6 @@ if ($user_filter > 0) {
 
 
         .customer-email {
-
             color: #65736a;
 
             font-size: 12px;
@@ -1121,7 +1354,6 @@ if ($user_filter > 0) {
 
 
         .order-date {
-
             color: #65736a;
 
             font-size: 13px;
@@ -1131,7 +1363,6 @@ if ($user_filter > 0) {
 
 
         .amount {
-
             color: #183a2a;
 
             font-weight: bold;
@@ -1141,7 +1372,6 @@ if ($user_filter > 0) {
 
 
         .item-count {
-
             display: inline-block;
 
             padding:
@@ -1166,7 +1396,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .status-form {
-
             display: flex;
 
             align-items: center;
@@ -1176,7 +1405,6 @@ if ($user_filter > 0) {
 
 
         .status-form select {
-
             height: 36px;
 
             padding:
@@ -1198,7 +1426,6 @@ if ($user_filter > 0) {
 
 
         .status-form button {
-
             height: 36px;
 
             padding:
@@ -1223,8 +1450,37 @@ if ($user_filter > 0) {
 
 
         .status-form button:hover {
-
             background: #23452d;
+        }
+
+
+        /* =========================================
+           DELIVERED STATUS
+        ========================================= */
+
+        .delivered-status {
+            display: inline-flex;
+
+            align-items: center;
+
+            justify-content: center;
+
+            height: 36px;
+
+            padding:
+                0 12px;
+
+            border-radius: 8px;
+
+            background: #e5efe7;
+
+            color: #315c3d;
+
+            font-size: 11px;
+
+            font-weight: bold;
+
+            white-space: nowrap;
         }
 
 
@@ -1233,7 +1489,6 @@ if ($user_filter > 0) {
         ========================================= */
 
         .empty-state {
-
             text-align: center;
 
             padding: 70px 20px;
@@ -1241,7 +1496,6 @@ if ($user_filter > 0) {
 
 
         .empty-state h3 {
-
             font-family:
                 Georgia,
                 "Times New Roman",
@@ -1256,7 +1510,6 @@ if ($user_filter > 0) {
 
 
         .empty-state p {
-
             color: #7a867e;
 
             font-size: 13px;
@@ -1270,7 +1523,6 @@ if ($user_filter > 0) {
         @media (max-width: 1100px) {
 
             .filter-grid {
-
                 grid-template-columns:
                     repeat(3, 1fr);
             }
@@ -1281,13 +1533,11 @@ if ($user_filter > 0) {
         @media (max-width: 900px) {
 
             .sidebar {
-
                 width: 210px;
             }
 
 
             .main-content {
-
                 margin-left: 210px;
 
                 width:
@@ -1302,13 +1552,11 @@ if ($user_filter > 0) {
         @media (max-width: 700px) {
 
             .admin-layout {
-
                 display: block;
             }
 
 
             .sidebar {
-
                 position: relative;
 
                 width: 100%;
@@ -1325,19 +1573,16 @@ if ($user_filter > 0) {
 
 
             .brand {
-
                 margin-bottom: 20px;
             }
 
 
             .brand img {
-
                 width: 130px;
             }
 
 
             .nav {
-
                 display: grid;
 
                 grid-template-columns:
@@ -1348,7 +1593,6 @@ if ($user_filter > 0) {
 
 
             .nav a {
-
                 text-align: center;
 
                 padding:
@@ -1357,7 +1601,6 @@ if ($user_filter > 0) {
 
 
             .logout {
-
                 margin-top: 15px;
 
                 padding-top: 15px;
@@ -1365,7 +1608,6 @@ if ($user_filter > 0) {
 
 
             .main-content {
-
                 margin-left: 0;
 
                 width: 100%;
@@ -1375,19 +1617,16 @@ if ($user_filter > 0) {
 
 
             .page-header h2 {
-
                 font-size: 28px;
             }
 
 
             .filter-grid {
-
                 grid-template-columns: 1fr;
             }
 
 
             .filter-actions {
-
                 align-items: stretch;
 
                 flex-direction: column;
@@ -1395,19 +1634,16 @@ if ($user_filter > 0) {
 
 
             .filter-actions .btn {
-
                 width: 100%;
             }
 
 
             .table-card {
-
                 padding: 15px;
             }
 
 
             .filter-summary {
-
                 align-items: flex-start;
 
                 flex-direction: column;
@@ -1419,7 +1655,6 @@ if ($user_filter > 0) {
         @media (max-width: 500px) {
 
             .nav {
-
                 grid-template-columns:
                     repeat(2, 1fr);
             }
@@ -1547,7 +1782,9 @@ if ($user_filter > 0) {
 
                 <div class="filter-error">
 
-                    <?= htmlspecialchars($filter_error) ?>
+                    <?= htmlspecialchars(
+                        $filter_error
+                    ) ?>
 
                 </div>
 
@@ -1573,7 +1810,9 @@ if ($user_filter > 0) {
                             type="date"
                             id="from_date"
                             name="from_date"
-                            value="<?= htmlspecialchars($from_date) ?>"
+                            value="<?= htmlspecialchars(
+                                $from_date
+                            ) ?>"
                         >
 
                     </div>
@@ -1589,7 +1828,9 @@ if ($user_filter > 0) {
                             type="time"
                             id="from_time"
                             name="from_time"
-                            value="<?= htmlspecialchars($from_time) ?>"
+                            value="<?= htmlspecialchars(
+                                $from_time
+                            ) ?>"
                         >
 
                     </div>
@@ -1605,7 +1846,9 @@ if ($user_filter > 0) {
                             type="date"
                             id="to_date"
                             name="to_date"
-                            value="<?= htmlspecialchars($to_date) ?>"
+                            value="<?= htmlspecialchars(
+                                $to_date
+                            ) ?>"
                         >
 
                     </div>
@@ -1621,7 +1864,9 @@ if ($user_filter > 0) {
                             type="time"
                             id="to_time"
                             name="to_time"
-                            value="<?= htmlspecialchars($to_time) ?>"
+                            value="<?= htmlspecialchars(
+                                $to_time
+                            ) ?>"
                         >
 
                     </div>
@@ -1666,12 +1911,22 @@ if ($user_filter > 0) {
 
 
                             <option
-                                value="Completed"
-                                <?= $status_filter === "Completed"
+                                value="Shipping"
+                                <?= $status_filter === "Shipping"
                                     ? "selected"
                                     : "" ?>
                             >
-                                Completed
+                                Shipping
+                            </option>
+
+
+                            <option
+                                value="Delivered"
+                                <?= $status_filter === "Delivered"
+                                    ? "selected"
+                                    : "" ?>
+                            >
+                                Delivered
                             </option>
 
 
@@ -1988,119 +2243,165 @@ if ($user_filter > 0) {
                                     <td>
 
 
-                                        <form
-                                            method="POST"
-                                            class="status-form"
-                                        >
+                                        <?php if (
+                                            $order["status"] === "Delivered"
+                                        ): ?>
 
 
-                                            <input
-                                                type="hidden"
-                                                name="order_id"
-                                                value="<?= (int) $order["id"] ?>"
+                                            <!-- =================================
+                                                 DELIVERED = LOCKED
+                                            ================================== -->
+
+                                            <span class="delivered-status">
+
+                                                ✓ Delivered
+
+                                            </span>
+
+
+                                        <?php else: ?>
+
+
+                                            <!-- =================================
+                                                 ACTIVE STATUS FORM
+                                            ================================== -->
+
+                                            <form
+                                                method="POST"
+                                                class="status-form"
                                             >
 
 
-                                            <input
-                                                type="hidden"
-                                                name="from_date"
-                                                value="<?= htmlspecialchars($from_date) ?>"
-                                            >
-
-
-                                            <input
-                                                type="hidden"
-                                                name="from_time"
-                                                value="<?= htmlspecialchars($from_time) ?>"
-                                            >
-
-
-                                            <input
-                                                type="hidden"
-                                                name="to_date"
-                                                value="<?= htmlspecialchars($to_date) ?>"
-                                            >
-
-
-                                            <input
-                                                type="hidden"
-                                                name="to_time"
-                                                value="<?= htmlspecialchars($to_time) ?>"
-                                            >
-
-
-                                            <input
-                                                type="hidden"
-                                                name="status_filter"
-                                                value="<?= htmlspecialchars($status_filter) ?>"
-                                            >
-
-
-                                            <input
-                                                type="hidden"
-                                                name="user_filter"
-                                                value="<?= (int) $user_filter ?>"
-                                            >
-
-
-                                            <select
-                                                name="status"
-                                            >
-
-
-                                                <option
-                                                    value="Pending"
-                                                    <?= $order["status"] === "Pending"
-                                                        ? "selected"
-                                                        : "" ?>
+                                                <input
+                                                    type="hidden"
+                                                    name="order_id"
+                                                    value="<?= (int) $order["id"] ?>"
                                                 >
-                                                    Pending
-                                                </option>
 
 
-                                                <option
-                                                    value="Processing"
-                                                    <?= $order["status"] === "Processing"
-                                                        ? "selected"
-                                                        : "" ?>
+                                                <input
+                                                    type="hidden"
+                                                    name="from_date"
+                                                    value="<?= htmlspecialchars(
+                                                        $from_date
+                                                    ) ?>"
                                                 >
-                                                    Processing
-                                                </option>
 
 
-                                                <option
-                                                    value="Completed"
-                                                    <?= $order["status"] === "Completed"
-                                                        ? "selected"
-                                                        : "" ?>
+                                                <input
+                                                    type="hidden"
+                                                    name="from_time"
+                                                    value="<?= htmlspecialchars(
+                                                        $from_time
+                                                    ) ?>"
                                                 >
-                                                    Completed
-                                                </option>
 
 
-                                                <option
-                                                    value="Cancelled"
-                                                    <?= $order["status"] === "Cancelled"
-                                                        ? "selected"
-                                                        : "" ?>
+                                                <input
+                                                    type="hidden"
+                                                    name="to_date"
+                                                    value="<?= htmlspecialchars(
+                                                        $to_date
+                                                    ) ?>"
                                                 >
-                                                    Cancelled
-                                                </option>
 
 
-                                            </select>
+                                                <input
+                                                    type="hidden"
+                                                    name="to_time"
+                                                    value="<?= htmlspecialchars(
+                                                        $to_time
+                                                    ) ?>"
+                                                >
 
 
-                                            <button
-                                                type="submit"
-                                                name="update_status"
-                                                value="1"
-                                            >
-                                                Update
-                                            </button>
+                                                <input
+                                                    type="hidden"
+                                                    name="status_filter"
+                                                    value="<?= htmlspecialchars(
+                                                        $status_filter
+                                                    ) ?>"
+                                                >
 
 
-                                        </form>
+                                                <input
+                                                    type="hidden"
+                                                    name="user_filter"
+                                                    value="<?= (int) $user_filter ?>"
+                                                >
+
+
+                                                <select
+                                                    name="status"
+                                                >
+
+
+                                                    <option
+                                                        value="Pending"
+                                                        <?= $order["status"] === "Pending"
+                                                            ? "selected"
+                                                            : "" ?>
+                                                    >
+                                                        Pending
+                                                    </option>
+
+
+                                                    <option
+                                                        value="Processing"
+                                                        <?= $order["status"] === "Processing"
+                                                            ? "selected"
+                                                            : "" ?>
+                                                    >
+                                                        Processing
+                                                    </option>
+
+
+                                                    <option
+                                                        value="Shipping"
+                                                        <?= $order["status"] === "Shipping"
+                                                            ? "selected"
+                                                            : "" ?>
+                                                    >
+                                                        Shipping
+                                                    </option>
+
+
+                                                    <option
+                                                        value="Delivered"
+                                                        <?= $order["status"] === "Delivered"
+                                                            ? "selected"
+                                                            : "" ?>
+                                                    >
+                                                        Delivered
+                                                    </option>
+
+
+                                                    <option
+                                                        value="Cancelled"
+                                                        <?= $order["status"] === "Cancelled"
+                                                            ? "selected"
+                                                            : "" ?>
+                                                    >
+                                                        Cancelled
+                                                    </option>
+
+
+                                                </select>
+
+
+                                                <button
+                                                    type="submit"
+                                                    name="update_status"
+                                                    value="1"
+                                                >
+                                                    Update
+                                                </button>
+
+
+                                            </form>
+
+
+                                        <?php endif; ?>
 
 
                                     </td>

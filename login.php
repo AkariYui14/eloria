@@ -1,984 +1,1088 @@
-<?php 
+<?php
 
-session_start(); 
+session_start();
 
-require_once "db.php"; 
-
-
-/* ========================================= 
-   PREVENT BROWSER CACHING
-========================================= */ 
-
-header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0"); 
-header("Cache-Control: post-check=0, pre-check=0", false); 
-header("Pragma: no-cache"); 
-header("Expires: 0"); 
+require_once "db.php";
 
 
-/* ========================================= 
+/* =========================================
+   SESSION CHECK FOR JAVASCRIPT
+========================================= */
+
+if (
+    isset($_GET["session_check"]) &&
+    $_GET["session_check"] === "1"
+) {
+
+    header("Content-Type: application/json");
+
+    echo json_encode([
+        "logged_in" => isset($_SESSION["user_id"]),
+        "is_admin" => (
+            isset($_SESSION["is_admin"]) &&
+            (int) $_SESSION["is_admin"] === 1
+        )
+    ]);
+
+    exit;
+}
+
+
+/* =========================================
    VARIABLES
-========================================= */ 
+========================================= */
 
-$error = ""; 
+$error = "";
 
-$email = ""; 
+$email = "";
 
-$registered = 
-    isset($_GET["registered"]) && 
-    $_GET["registered"] === "1"; 
-
-
-/* ========================================= 
-   ALREADY LOGGED IN
-========================================= */ 
-
-if (isset($_SESSION["user_id"])) { 
-
-    if ( 
-        isset($_SESSION["is_admin"]) && 
-        (int) $_SESSION["is_admin"] === 1 
-    ) { 
-
-        header("Location: admin/index.php"); 
-        exit; 
-
-    } 
-
-    header("Location: index.php"); 
-    exit; 
-} 
+$registered =
+    isset($_GET["registered"]) &&
+    $_GET["registered"] === "1";
 
 
-/* ========================================= 
+/* =========================================
    HANDLE LOGIN
-========================================= */ 
+========================================= */
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") { 
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
-    $email = trim($_POST["email"] ?? ""); 
+    $email = trim($_POST["email"] ?? "");
 
-    $password = $_POST["password"] ?? ""; 
+    $password = $_POST["password"] ?? "";
 
 
-    /* ========================================= 
+    /* =========================================
        VALIDATION
-    ========================================= */ 
+    ========================================= */
 
-    if ($email === "" || $password === "") { 
+    if ($email === "" || $password === "") {
 
-        $error = 
-            "Please enter your email and password."; 
+        $error =
+            "Please enter your email and password.";
 
-    } elseif (!filter_var( 
-        $email, 
-        FILTER_VALIDATE_EMAIL 
-    )) { 
+    } elseif (
+        !filter_var(
+            $email,
+            FILTER_VALIDATE_EMAIL
+        )
+    ) {
 
-        $error = 
-            "Please enter a valid email address."; 
+        $error =
+            "Please enter a valid email address.";
 
-    } else { 
+    } else {
 
 
-        /* ========================================= 
+        /* =========================================
            FIND ACCOUNT
-        ========================================= */ 
+        ========================================= */
 
-        $stmt = $conn->prepare( 
-            "SELECT 
-                id, 
-                first_name, 
-                last_name, 
-                email, 
-                password, 
-                is_admin 
-             FROM users 
-             WHERE email = ? 
-             LIMIT 1" 
-        ); 
+        $stmt = $conn->prepare(
+            "SELECT
+                id,
+                first_name,
+                last_name,
+                email,
+                password,
+                is_admin
+             FROM users
+             WHERE email = ?
+             LIMIT 1"
+        );
 
 
-        $stmt->bind_param( 
-            "s", 
-            $email 
-        ); 
+        if (!$stmt) {
 
+            $error =
+                "Something went wrong. Please try again.";
 
-        $stmt->execute(); 
+        } else {
 
+            $stmt->bind_param(
+                "s",
+                $email
+            );
 
-        $result = $stmt->get_result(); 
+            $stmt->execute();
 
+            $result = $stmt->get_result();
 
-        /* ========================================= 
-           CHECK ACCOUNT
-        ========================================= */ 
 
-        if ($result->num_rows === 1) { 
+            /* =========================================
+               CHECK ACCOUNT
+            ========================================= */
 
-            $user = $result->fetch_assoc(); 
+            if ($result->num_rows === 1) {
 
+                $user = $result->fetch_assoc();
 
-            /* ========================================= 
-               VERIFY PASSWORD
-            ========================================= */ 
 
-            if ( 
-                password_verify( 
-                    $password, 
-                    $user["password"] 
-                ) 
-            ) { 
+                /* =========================================
+                   VERIFY PASSWORD
+                ========================================= */
 
+                if (
+                    password_verify(
+                        $password,
+                        $user["password"]
+                    )
+                ) {
 
-                /* ========================================= 
-                   REFRESH SESSION ID
-                ========================================= */ 
 
-                session_regenerate_id(true); 
+                    /* =========================================
+                       REFRESH SESSION ID
+                    ========================================= */
 
+                    session_regenerate_id(true);
 
-                /* ========================================= 
-                   CREATE SESSION
-                ========================================= */ 
 
-                $_SESSION["user_id"] = 
-                    $user["id"]; 
+                    /* =========================================
+                       CREATE SESSION
+                    ========================================= */
 
-                $_SESSION["first_name"] = 
-                    $user["first_name"]; 
+                    $_SESSION["user_id"] =
+                        $user["id"];
 
-                $_SESSION["last_name"] = 
-                    $user["last_name"]; 
+                    $_SESSION["first_name"] =
+                        $user["first_name"];
 
-                $_SESSION["email"] = 
-                    $user["email"]; 
+                    $_SESSION["last_name"] =
+                        $user["last_name"];
 
-                $_SESSION["is_admin"] = 
-                    (int) $user["is_admin"]; 
+                    $_SESSION["email"] =
+                        $user["email"];
 
+                    $_SESSION["is_admin"] =
+                        (int) $user["is_admin"];
 
-                /* ========================================= 
-                   RECORD LOGIN ACTIVITY
-                ========================================= */ 
 
-                $action = "LOGIN"; 
+                    /* =========================================
+                       RECORD LOGIN ACTIVITY
+                    ========================================= */
 
-                $description = 
-                    "User logged into the account."; 
+                    $action = "LOGIN";
 
-                $targetType = "User"; 
+                    $description =
+                        "User logged into the account.";
 
-                $targetId = 
-                    (int) $user["id"]; 
+                    $targetType = "User";
 
+                    $targetId =
+                        (int) $user["id"];
 
-                $activity = $conn->prepare( 
-                    "INSERT INTO activity_logs 
-                    ( 
-                        user_id, 
-                        action, 
-                        description, 
-                        target_type, 
-                        target_id 
-                    ) 
-                    VALUES (?, ?, ?, ?, ?)" 
-                ); 
 
+                    $activity = $conn->prepare(
+                        "INSERT INTO activity_logs
+                        (
+                            user_id,
+                            action,
+                            description,
+                            target_type,
+                            target_id
+                        )
+                        VALUES (?, ?, ?, ?, ?)"
+                    );
 
-                if ($activity) { 
 
-                    $activity->bind_param( 
-                        "isssi", 
-                        $targetId, 
-                        $action, 
-                        $description, 
-                        $targetType, 
-                        $targetId 
-                    ); 
+                    if ($activity) {
 
+                        $activity->bind_param(
+                            "isssi",
+                            $targetId,
+                            $action,
+                            $description,
+                            $targetType,
+                            $targetId
+                        );
 
-                    $activity->execute(); 
+                        $activity->execute();
 
-                    $activity->close(); 
-                } 
+                        $activity->close();
+                    }
 
 
-                $stmt->close(); 
+                    $stmt->close();
 
 
-                /* ========================================= 
-                   ADMIN / CUSTOMER REDIRECT
-                ========================================= */ 
+                    /* =========================================
+                       ADMIN / CUSTOMER REDIRECT
+                    ========================================= */
 
-                if ( 
-                    (int) $user["is_admin"] === 1 
-                ) { 
+                    if (
+                        (int) $user["is_admin"] === 1
+                    ) {
 
-                    header( 
-                        "Location: admin/index.php" 
-                    ); 
+                        header(
+                            "Location: admin/index.php"
+                        );
 
-                    exit; 
+                        exit;
 
-                } else { 
+                    } else {
 
-                    header( 
-                        "Location: index.php" 
-                    ); 
+                        header(
+                            "Location: index.php"
+                        );
 
-                    exit; 
-                } 
+                        exit;
+                    }
 
 
-            } else { 
+                } else {
 
-                $error = 
-                    "Invalid email or password."; 
-            } 
+                    $error =
+                        "Invalid email or password.";
+                }
 
-        } else { 
 
-            $error = 
-                "Invalid email or password."; 
-        } 
+            } else {
 
+                $error =
+                    "Invalid email or password.";
+            }
 
-        $stmt->close(); 
-    } 
-} 
 
-?> 
+            $stmt->close();
+        }
+    }
+}
 
+?>
 
-<!DOCTYPE html> 
 
-<html lang="en"> 
+<!DOCTYPE html>
 
-<head> 
+<html lang="en">
 
-    <meta charset="UTF-8"> 
+<head>
 
-    <meta 
-        name="viewport" 
-        content="width=device-width, initial-scale=1.0" 
-    > 
+    <meta charset="UTF-8">
 
-    <title> 
-        Sign In | Elora Plants 
-    </title> 
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
+    <title>
+        Sign In | Elora Plants
+    </title>
 
-    <style> 
 
-        /* ========================================= 
+    <style>
+
+        /* =========================================
            RESET
-        ========================================= */ 
+        ========================================= */
 
-        * { 
-            margin: 0; 
-            padding: 0; 
-            box-sizing: border-box; 
-        } 
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            BODY
-        ========================================= */ 
+        ========================================= */
 
-        body { 
+        body {
 
-            min-height: 100vh; 
+            min-height: 100vh;
 
-            display: flex; 
+            display: flex;
 
-            align-items: center; 
+            align-items: center;
 
-            justify-content: center; 
+            justify-content: center;
 
-            padding: 30px; 
+            padding: 30px;
 
-            background: #fafbf8; 
+            background: #fafbf8;
 
-            color: #173c27; 
+            color: #173c27;
 
-            font-family: 
-                Arial, 
-                Helvetica, 
-                sans-serif; 
-        } 
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            WRAPPER
-        ========================================= */ 
+        ========================================= */
 
-        .login-wrapper { 
+        .login-wrapper {
 
-            width: 100%; 
+            width: 100%;
 
-            max-width: 440px; 
-        } 
+            max-width: 440px;
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            BRAND
-        ========================================= */ 
+        ========================================= */
 
-        .brand { 
+        .brand {
 
-            text-align: center; 
+            text-align: center;
 
-            margin-bottom: 24px; 
-        } 
-
-
-        .brand a { 
-
-            display: inline-block; 
-
-            text-decoration: none; 
-
-            transition: 
-                transform 0.25s ease; 
-        } 
+            margin-bottom: 24px;
+        }
 
 
-        .brand a:hover { 
+        .brand a {
 
-            transform: 
-                translateY(-2px); 
-        } 
+            display: inline-block;
 
+            text-decoration: none;
 
-        .brand img { 
-
-            display: block; 
-
-            width: 190px; 
-
-            max-width: 100%; 
-
-            height: auto; 
-
-            margin: 0 auto; 
-
-            object-fit: contain; 
-        } 
+            transition:
+                transform 0.25s ease;
+        }
 
 
-        .brand p { 
+        .brand a:hover {
 
-            margin-top: 8px; 
-
-            color: #607064; 
-
-            font-size: 13px; 
-        } 
+            transform:
+                translateY(-2px);
+        }
 
 
-        /* ========================================= 
+        .brand img {
+
+            display: block;
+
+            width: 190px;
+
+            max-width: 100%;
+
+            height: auto;
+
+            margin: 0 auto;
+
+            object-fit: contain;
+        }
+
+
+        .brand p {
+
+            margin-top: 8px;
+
+            color: #607064;
+
+            font-size: 13px;
+        }
+
+
+        /* =========================================
            LOGIN CARD
-        ========================================= */ 
+        ========================================= */
 
-        .login-card { 
+        .login-card {
 
-            padding: 36px; 
+            padding: 36px;
 
-            background: #ffffff; 
+            background: #ffffff;
 
-            border: 
-                1px solid #dce5d9; 
+            border:
+                1px solid #dce5d9;
 
-            border-radius: 24px; 
+            border-radius: 24px;
 
-            box-shadow: 
-                0 18px 50px 
-                rgba(23, 60, 39, 0.08); 
-        } 
+            box-shadow:
+                0 18px 50px
+                rgba(23, 60, 39, 0.08);
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            TITLE
-        ========================================= */ 
+        ========================================= */
 
-        .login-card h1 { 
+        .login-card h1 {
 
-            margin-bottom: 8px; 
+            margin-bottom: 8px;
 
-            color: #173c27; 
+            color: #173c27;
 
-            font-family: 
-                Georgia, 
-                "Times New Roman", 
-                serif; 
+            font-family:
+                Georgia,
+                "Times New Roman",
+                serif;
 
-            font-size: 30px; 
-        } 
-
-
-        .subtitle { 
-
-            margin-bottom: 26px; 
-
-            color: #607064; 
-
-            font-size: 14px; 
-
-            line-height: 1.6; 
-        } 
+            font-size: 30px;
+        }
 
 
-        /* ========================================= 
+        .subtitle {
+
+            margin-bottom: 26px;
+
+            color: #607064;
+
+            font-size: 14px;
+
+            line-height: 1.6;
+        }
+
+
+        /* =========================================
            SUCCESS MESSAGE
-        ========================================= */ 
+        ========================================= */
 
-        .success-message { 
+        .success-message {
 
-            padding: 13px 15px; 
+            padding: 13px 15px;
 
-            margin-bottom: 20px; 
+            margin-bottom: 20px;
 
-            border: 
-                1px solid #cbdcc5; 
+            border:
+                1px solid #cbdcc5;
 
-            border-radius: 12px; 
+            border-radius: 12px;
 
-            background: #edf3e8; 
+            background: #edf3e8;
 
-            color: #245637; 
+            color: #245637;
 
-            font-size: 13px; 
+            font-size: 13px;
 
-            line-height: 1.5; 
-        } 
+            line-height: 1.5;
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            ERROR MESSAGE
-        ========================================= */ 
+        ========================================= */
 
-        .error-message { 
+        .error-message {
 
-            padding: 13px 15px; 
+            padding: 13px 15px;
 
-            margin-bottom: 20px; 
+            margin-bottom: 20px;
 
-            border: 
-                1px solid #efd2cc; 
+            border:
+                1px solid #efd2cc;
 
-            border-radius: 12px; 
+            border-radius: 12px;
 
-            background: #fff3f1; 
+            background: #fff3f1;
 
-            color: #9b3d31; 
+            color: #9b3d31;
 
-            font-size: 13px; 
+            font-size: 13px;
 
-            line-height: 1.5; 
-        } 
+            line-height: 1.5;
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            FORM GROUP
-        ========================================= */ 
+        ========================================= */
 
-        .form-group { 
+        .form-group {
 
-            margin-bottom: 18px; 
-        } 
+            margin-bottom: 18px;
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            LABEL
-        ========================================= */ 
+        ========================================= */
 
-        label { 
+        label {
 
-            display: block; 
+            display: block;
 
-            margin-bottom: 7px; 
+            margin-bottom: 7px;
 
-            color: #173c27; 
+            color: #173c27;
 
-            font-size: 13px; 
+            font-size: 13px;
 
-            font-weight: 700; 
-        } 
+            font-weight: 700;
+        }
 
 
-        /* ========================================= 
+        /* =========================================
            INPUT
-        ========================================= */ 
+        ========================================= */
 
-        input { 
+        input {
 
-            width: 100%; 
+            width: 100%;
 
-            padding: 13px 14px; 
+            padding: 13px 14px;
 
-            border: 
-                1px solid #dce5d9; 
+            border:
+                1px solid #dce5d9;
 
-            border-radius: 12px; 
+            border-radius: 12px;
 
-            outline: none; 
+            outline: none;
 
-            background: #fafbf8; 
+            background: #fafbf8;
 
-            color: #173c27; 
+            color: #173c27;
 
-            font-size: 14px; 
+            font-size: 14px;
 
-            transition: 
-                border-color 0.25s ease, 
-                box-shadow 0.25s ease, 
-                background 0.25s ease; 
-        } 
-
-
-        input:focus { 
-
-            background: #ffffff; 
-
-            border-color: #245637; 
-
-            box-shadow: 
-                0 0 0 4px 
-                rgba(36, 86, 55, 0.08); 
-        } 
+            transition:
+                border-color 0.25s ease,
+                box-shadow 0.25s ease,
+                background 0.25s ease;
+        }
 
 
-        /* ========================================= 
+        input:focus {
+
+            background: #ffffff;
+
+            border-color: #245637;
+
+            box-shadow:
+                0 0 0 4px
+                rgba(36, 86, 55, 0.08);
+        }
+
+
+        /* =========================================
            PASSWORD WRAPPER
-        ========================================= */ 
+        ========================================= */
 
-        .password-wrapper { 
+        .password-wrapper {
 
-            position: relative; 
-        } 
-
-
-        .password-wrapper input { 
-
-            padding-right: 72px; 
-        } 
+            position: relative;
+        }
 
 
-        .show-password { 
+        .password-wrapper input {
 
-            position: absolute; 
-
-            top: 50%; 
-
-            right: 12px; 
-
-            transform: 
-                translateY(-50%); 
-
-            padding: 5px; 
-
-            border: none; 
-
-            background: transparent; 
-
-            color: #607064; 
-
-            cursor: pointer; 
-
-            font-size: 12px; 
-
-            font-weight: 700; 
-        } 
+            padding-right: 72px;
+        }
 
 
-        .show-password:hover { 
+        .show-password {
 
-            color: #173c27; 
-        } 
+            position: absolute;
+
+            top: 50%;
+
+            right: 12px;
+
+            transform:
+                translateY(-50%);
+
+            padding: 5px;
+
+            border: none;
+
+            background: transparent;
+
+            color: #607064;
+
+            cursor: pointer;
+
+            font-size: 12px;
+
+            font-weight: 700;
+        }
 
 
-        /* ========================================= 
+        .show-password:hover {
+
+            color: #173c27;
+        }
+
+
+        /* =========================================
            LOGIN BUTTON
-        ========================================= */ 
+        ========================================= */
 
-        .login-button { 
+        .login-button {
 
-            width: 100%; 
+            width: 100%;
 
-            padding: 14px 18px; 
+            padding: 14px 18px;
 
-            border: none; 
+            border: none;
 
-            border-radius: 24px; 
+            border-radius: 24px;
 
-            background: #173c27; 
+            background: #173c27;
 
-            color: #ffffff; 
+            color: #ffffff;
 
-            cursor: pointer; 
+            cursor: pointer;
 
-            font-size: 14px; 
+            font-size: 14px;
 
-            font-weight: 700; 
+            font-weight: 700;
 
-            transition: 
-                background 0.25s ease, 
-                transform 0.25s ease, 
-                box-shadow 0.25s ease; 
-        } 
-
-
-        .login-button:hover { 
-
-            background: #245637; 
-
-            transform: 
-                translateY(-2px); 
-
-            box-shadow: 
-                0 10px 24px 
-                rgba(23, 60, 39, 0.18); 
-        } 
+            transition:
+                background 0.25s ease,
+                transform 0.25s ease,
+                box-shadow 0.25s ease;
+        }
 
 
-        /* ========================================= 
+        .login-button:hover {
+
+            background: #245637;
+
+            transform:
+                translateY(-2px);
+
+            box-shadow:
+                0 10px 24px
+                rgba(23, 60, 39, 0.18);
+        }
+
+
+        /* =========================================
            SIGN UP
-        ========================================= */ 
+        ========================================= */
 
-        .signup-text { 
+        .signup-text {
 
-            margin-top: 22px; 
+            margin-top: 22px;
 
-            text-align: center; 
+            text-align: center;
 
-            color: #607064; 
+            color: #607064;
 
-            font-size: 13px; 
-        } 
-
-
-        .signup-text a { 
-
-            color: #245637; 
-
-            font-weight: 700; 
-
-            text-decoration: none; 
-        } 
+            font-size: 13px;
+        }
 
 
-        .signup-text a:hover { 
+        .signup-text a {
 
-            color: #173c27; 
+            color: #245637;
 
-            text-decoration: underline; 
-        } 
+            font-weight: 700;
+
+            text-decoration: none;
+        }
 
 
-        /* ========================================= 
+        .signup-text a:hover {
+
+            color: #173c27;
+
+            text-decoration: underline;
+        }
+
+
+        /* =========================================
            HOME
-        ========================================= */ 
+        ========================================= */
 
-        .back-home { 
+        .back-home {
 
-            display: block; 
+            display: block;
 
-            margin-top: 18px; 
+            margin-top: 18px;
 
-            color: #607064; 
+            color: #607064;
 
-            text-align: center; 
+            text-align: center;
 
-            font-size: 13px; 
+            font-size: 13px;
 
-            text-decoration: none; 
+            text-decoration: none;
 
-            transition: 
-                color 0.25s ease; 
-        } 
-
-
-        .back-home:hover { 
-
-            color: #173c27; 
-        } 
+            transition:
+                color 0.25s ease;
+        }
 
 
-        /* ========================================= 
+        .back-home:hover {
+
+            color: #173c27;
+        }
+
+
+        /* =========================================
            RESPONSIVE
-        ========================================= */ 
+        ========================================= */
 
-        @media (max-width: 520px) { 
+        @media (max-width: 520px) {
 
-            body { 
+            body {
 
-                padding: 18px; 
-            } 
-
-
-            .brand img { 
-
-                width: 165px; 
-            } 
+                padding: 18px;
+            }
 
 
-            .login-card { 
+            .brand img {
 
-                padding: 26px 20px; 
-            } 
-
-
-            .login-card h1 { 
-
-                font-size: 27px; 
-            } 
-
-        } 
-
-    </style> 
-
-</head> 
+                width: 165px;
+            }
 
 
-<body> 
+            .login-card {
+
+                padding: 26px 20px;
+            }
 
 
-    <main class="login-wrapper"> 
+            .login-card h1 {
+
+                font-size: 27px;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+    <main class="login-wrapper">
 
 
         <!-- =====================================
              BRAND / LOGO
-        ====================================== --> 
+        ====================================== -->
 
-        <div class="brand"> 
+        <div class="brand">
 
-            <a href="index.php"> 
+            <a href="index.php">
 
-                <img 
-                    src="image/logo.png" 
-                    alt="Elora Plants" 
-                > 
+                <img
+                    src="image/logo.png"
+                    alt="Elora Plants"
+                >
 
-            </a> 
+            </a>
 
 
-            <p> 
-                Little plants. Little joys. 
-            </p> 
+            <p>
+                Little plants. Little joys.
+            </p>
 
-        </div> 
+        </div>
 
 
         <!-- =====================================
              LOGIN CARD
-        ====================================== --> 
+        ====================================== -->
 
-        <section class="login-card"> 
-
-
-            <h1> 
-                Welcome Back 
-            </h1> 
+        <section class="login-card">
 
 
-            <p class="subtitle"> 
+            <h1>
+                Welcome Back
+            </h1>
 
-                Sign in to continue to your 
-                Elora Plants account. 
 
-            </p> 
+            <p class="subtitle">
+
+                Sign in to continue to your
+                Elora Plants account.
+
+            </p>
 
 
             <!-- =================================
                  REGISTRATION SUCCESS
-            ================================== --> 
+            ================================== -->
 
-            <?php if ($registered): ?> 
+            <?php if ($registered): ?>
 
-                <div class="success-message"> 
+                <div class="success-message">
 
-                    Your account was created successfully. 
-                    You can now sign in. 
+                    Your account was created successfully.
+                    You can now sign in.
 
-                </div> 
+                </div>
 
-            <?php endif; ?> 
+            <?php endif; ?>
 
 
             <!-- =================================
                  ERROR
-            ================================== --> 
+            ================================== -->
 
-            <?php if ($error !== ""): ?> 
+            <?php if ($error !== ""): ?>
 
-                <div class="error-message"> 
+                <div class="error-message">
 
-                    <?= htmlspecialchars($error) ?> 
+                    <?= htmlspecialchars($error) ?>
 
-                </div> 
+                </div>
 
-            <?php endif; ?> 
+            <?php endif; ?>
 
 
             <!-- =================================
                  LOGIN FORM
-            ================================== --> 
+            ================================== -->
 
-            <form 
-                method="POST" 
-                action="login.php" 
-            > 
+            <form
+                method="POST"
+                action="login.php"
+            >
 
 
                 <!-- =============================
                      EMAIL
-                ============================== --> 
+                ============================== -->
 
-                <div class="form-group"> 
+                <div class="form-group">
 
-                    <label for="email"> 
-                        Email Address 
-                    </label> 
+                    <label for="email">
+                        Email Address
+                    </label>
 
 
-                    <input 
-                        type="email" 
-                        id="email" 
-                        name="email" 
-                        value="<?= htmlspecialchars($email) ?>" 
-                        placeholder="you@example.com" 
-                        autocomplete="email" 
-                        required 
-                    > 
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        value="<?= htmlspecialchars($email) ?>"
+                        placeholder="you@example.com"
+                        autocomplete="email"
+                        required
+                    >
 
-                </div> 
+                </div>
 
 
                 <!-- =============================
                      PASSWORD
-                ============================== --> 
+                ============================== -->
 
-                <div class="form-group"> 
+                <div class="form-group">
 
-                    <label for="password"> 
-                        Password 
-                    </label> 
-
-
-                    <div class="password-wrapper"> 
-
-                        <input 
-                            type="password" 
-                            id="password" 
-                            name="password" 
-                            placeholder="Enter your password" 
-                            autocomplete="current-password" 
-                            required 
-                        > 
+                    <label for="password">
+                        Password
+                    </label>
 
 
-                        <button 
-                            type="button" 
-                            class="show-password" 
-                            id="showPassword" 
-                        > 
-                            Show 
-                        </button> 
+                    <div class="password-wrapper">
 
-                    </div> 
+                        <input
+                            type="password"
+                            id="password"
+                            name="password"
+                            placeholder="Enter your password"
+                            autocomplete="current-password"
+                            required
+                        >
 
-                </div> 
+
+                        <button
+                            type="button"
+                            class="show-password"
+                            id="showPassword"
+                        >
+                            Show
+                        </button>
+
+                    </div>
+
+                </div>
 
 
                 <!-- =============================
                      LOGIN
-                ============================== --> 
+                ============================== -->
 
-                <button 
-                    type="submit" 
-                    class="login-button" 
-                > 
-                    Sign In 
-                </button> 
+                <button
+                    type="submit"
+                    class="login-button"
+                >
+                    Sign In
+                </button>
 
 
-            </form> 
+            </form>
 
 
             <!-- =================================
                  SIGN UP
-            ================================== --> 
+            ================================== -->
 
-            <p class="signup-text"> 
+            <p class="signup-text">
 
-                Don't have an account? 
+                Don't have an account?
 
-                <a href="signup.php"> 
-                    Create Account 
-                </a> 
+                <a href="signup.php">
+                    Create Account
+                </a>
 
-            </p> 
+            </p>
 
 
             <!-- =================================
                  HOME
-            ================================== --> 
+            ================================== -->
 
-            <a 
-                href="index.php" 
-                class="back-home" 
-            > 
-                ← Back to Elora Plants 
-            </a> 
-
-
-        </section> 
+            <a
+                href="index.php"
+                class="back-home"
+            >
+                ← Back to Elora Plants
+            </a>
 
 
-    </main> 
+        </section>
+
+
+    </main>
 
 
     <!-- =========================================
          SHOW / HIDE PASSWORD
-    ========================================= --> 
+    ========================================= -->
 
-    <script> 
+    <script>
 
-        const showPassword = 
-            document.getElementById("showPassword"); 
+        const showPassword =
+            document.getElementById("showPassword");
 
-        const passwordInput = 
-            document.getElementById("password"); 
-
-
-        showPassword.addEventListener( 
-            "click", 
-            function () { 
-
-                if ( 
-                    passwordInput.type === "password" 
-                ) { 
-
-                    passwordInput.type = "text"; 
-
-                    showPassword.textContent = 
-                        "Hide"; 
-
-                } else { 
-
-                    passwordInput.type = "password"; 
-
-                    showPassword.textContent = 
-                        "Show"; 
-                } 
-
-            } 
-        ); 
-
-    </script> 
+        const passwordInput =
+            document.getElementById("password");
 
 
-</body> 
+        showPassword.addEventListener(
+            "click",
+            function () {
+
+                if (
+                    passwordInput.type === "password"
+                ) {
+
+                    passwordInput.type = "text";
+
+                    showPassword.textContent =
+                        "Hide";
+
+                } else {
+
+                    passwordInput.type = "password";
+
+                    showPassword.textContent =
+                        "Show";
+
+                }
+
+            }
+        );
+
+
+        /* =========================================
+           SESSION / BROWSER NAVIGATION
+        ========================================= */
+
+        function checkLoggedInUser() {
+
+            fetch(
+                "login.php?session_check=1",
+                {
+                    method: "GET",
+                    cache: "no-store"
+                }
+            )
+            .then(
+                response => response.json()
+            )
+            .then(
+                data => {
+
+                    if (!data.logged_in) {
+
+                        return;
+                    }
+
+
+                    if (data.is_admin) {
+
+                        window.location.replace(
+                            "admin/index.php"
+                        );
+
+                    } else {
+
+                        window.location.replace(
+                            "index.php"
+                        );
+
+                    }
+
+                }
+            )
+            .catch(
+                error => {
+
+                    console.error(
+                        "Session check failed:",
+                        error
+                    );
+
+                }
+            );
+
+        }
+
+
+        /* =========================================
+           DETECT BROWSER NAVIGATION
+        ========================================= */
+
+        window.addEventListener(
+            "pageshow",
+            function (event) {
+
+                const navigation =
+                    performance.getEntriesByType(
+                        "navigation"
+                    )[0];
+
+
+                const navigationType =
+                    navigation
+                        ? navigation.type
+                        : "navigate";
+
+
+                /*
+                 * BACK / FORWARD
+                 *
+                 * When the user presses Back,
+                 * leave the login page visible.
+                 */
+
+                if (
+                    navigationType === "back_forward" ||
+                    event.persisted === true
+                ) {
+
+                    return;
+                }
+
+
+                /*
+                 * NORMAL OPEN OR REFRESH
+                 *
+                 * Check the current session.
+                 */
+
+                checkLoggedInUser();
+
+            }
+        );
+
+    </script>
+
+
+</body>
 
 </html>
